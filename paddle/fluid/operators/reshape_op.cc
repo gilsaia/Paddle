@@ -19,7 +19,6 @@ limitations under the License. */
 #include "paddle/fluid/framework/phi_utils.h"
 
 // only can include the headers in paddle/phi/api dirs
-#include "paddle/phi/api/lib/utils/tensor_utils.h"
 #include "paddle/phi/backends/cpu/cpu_context.h"
 #include "paddle/phi/common/int_array.h"
 #include "paddle/phi/core/infermeta_utils.h"
@@ -424,27 +423,27 @@ class ReshapeKernel {
     }
     if (platform::is_cpu_place(ctx.GetPlace())) {
       auto &dev_ctx = ctx.device_context<phi::CPUContext>();
-      phi::ReshapeKernel(static_cast<const phi::CPUContext &>(dev_ctx),
-                         *in,
-                         pt_scalar_shape,
-                         out);
+      phi::ReshapeInferKernel(static_cast<const phi::CPUContext &>(dev_ctx),
+                              *in,
+                              pt_scalar_shape,
+                              out);
     }
 #if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)
     if (platform::is_gpu_place(ctx.GetPlace())) {
       auto &dev_ctx = ctx.device_context<phi::GPUContext>();
-      phi::ReshapeKernel(static_cast<const phi::GPUContext &>(dev_ctx),
-                         *in,
-                         pt_scalar_shape,
-                         out);
+      phi::ReshapeInferKernel(static_cast<const phi::GPUContext &>(dev_ctx),
+                              *in,
+                              pt_scalar_shape,
+                              out);
     }
 #endif
 #ifdef PADDLE_WITH_XPU
     if (platform::is_xpu_place(ctx.GetPlace())) {
       auto &dev_ctx = ctx.device_context<platform::XPUDeviceContext>();
-      phi::ReshapeKernel(static_cast<const phi::XPUContext &>(dev_ctx),
-                         *in,
-                         pt_scalar_shape,
-                         out);
+      phi::ReshapeInferKernel(static_cast<const phi::XPUContext &>(dev_ctx),
+                              *in,
+                              pt_scalar_shape,
+                              out);
     }
 #endif
   }

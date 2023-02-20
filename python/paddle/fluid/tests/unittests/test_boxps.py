@@ -17,8 +17,8 @@ import unittest
 import paddle
 import paddle.fluid as fluid
 import paddle.fluid.core as core
+from paddle.distributed.transpiler import collective
 from paddle.fluid.layers.nn import _pull_box_sparse
-from paddle.fluid.transpiler import collective
 
 
 class TestTranspile(unittest.TestCase):
@@ -96,11 +96,11 @@ class TestPullBoxSparseOP(unittest.TestCase):
         paddle.enable_static()
         program = fluid.Program()
         with fluid.program_guard(program):
-            x = fluid.layers.data(
-                name='x', shape=[1], dtype='int64', lod_level=0
+            x = paddle.static.data(
+                name='x', shape=[-1, 1], dtype='int64', lod_level=0
             )
-            y = fluid.layers.data(
-                name='y', shape=[1], dtype='int64', lod_level=0
+            y = paddle.static.data(
+                name='y', shape=[-1, 1], dtype='int64', lod_level=0
             )
             emb_x, emb_y = _pull_box_sparse([x, y], size=1)
 

@@ -46,7 +46,6 @@ limitations under the License. */
 
 #if defined(PADDLE_WITH_GLOO)
 #include "paddle/fluid/distributed/collective/process_group_gloo.h"
-#include "paddle/fluid/distributed/store/tcp_store.h"
 #endif
 
 #if defined(PADDLE_WITH_XPU_BKCL)
@@ -1252,7 +1251,9 @@ void BindDistributed(py::module *m) {
                       py::arg("rank"),
                       py::arg("world_size"),
                       py::arg("group_id") = 0,
-                      py::call_guard<py::gil_scoped_release>());
+                      py::call_guard<py::gil_scoped_release>())
+          .def_static("group_start", distributed::ProcessGroupBKCL::GroupStart)
+          .def_static("group_end", distributed::ProcessGroupBKCL::GroupEnd);
 #endif
 
   py::class_<distributed::ProcessGroup::Task,
@@ -1309,6 +1310,14 @@ void BindDistributed(py::module *m) {
           },
           py::arg("tensors"),
           py::call_guard<py::gil_scoped_release>());
+
+  py::class_<distributed::ProcessGroupIdMap,
+             std::shared_ptr<distributed::ProcessGroupIdMap>>(
+      *m, "ProcessGroupIdMap")
+      .def_static("destroy",
+                  distributed::ProcessGroupIdMap::DestroyProcessGroup,
+                  py::arg("group_id") = 0,
+                  py::call_guard<py::gil_scoped_release>());
 }
 
 }  // end namespace pybind

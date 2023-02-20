@@ -57,13 +57,13 @@ class FleetUtil:
         op_maker = core.op_proto_and_checker_maker
         self.op_role_key = op_maker.kOpRoleAttrName()
         if mode == "pslib":
-            from paddle.fluid.incubate.fleet.parameter_server.pslib import (
+            from paddle.incubate.fleet.parameter_server.pslib import (
                 fleet as fleet_pslib,
             )
 
             fleet = fleet_pslib
         elif mode == "transpiler":
-            from paddle.fluid.incubate.fleet.parameter_server.distribute_transpiler import (
+            from paddle.incubate.fleet.parameter_server.distribute_transpiler import (
                 fleet as fleet_transpiler,
             )
 
@@ -1371,8 +1371,8 @@ class FleetUtil:
                                                           local_total_ins.name)
 
               # below is part of example model
-              label = fluid.layers.data(name="click", shape=[-1, 1],\
-                  dtype="int64", lod_level=0, append_batch_size=False)
+              label = paddle.static.data(name="click", shape=[-1, 1],\
+                  dtype="int64", lod_level=0)
               emb = my_slot_net(slots, label) # emb can be fc layer of size 1
               similarity_norm = fluid.layers.sigmoid(paddle.clip(\
                   emb, min=-15.0, max=15.0), name="similarity_norm")\
@@ -1571,8 +1571,8 @@ class FleetUtil:
                                               local_total_ins.name)
 
               # below is part of model
-              label = fluid.layers.data(name="click", shape=[-1, 1],\
-                  dtype="int64", lod_level=0, append_batch_size=False)
+              label = paddle.static.data(name="click", shape=[-1, 1],\
+                  dtype="int64", lod_level=0)
               emb = my_slot_net(slots, label) # emb can be fc layer of size 1
               similarity_norm = fluid.layers.sigmoid(paddle.clip(\
                   emb, min=-15.0, max=15.0), name="similarity_norm")\

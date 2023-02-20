@@ -13,6 +13,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 #include <Python.h>
+// Avoid a problem with copysign defined in pyconfig.h on Windows.
+#ifdef copysign
+#undef copysign
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -713,6 +717,32 @@ void BindParallelExecutor(pybind11::module &m) {  // NOLINT
 
                         build_strategy = static.BuildStrategy()
                         build_strategy.fuse_gemm_epilogue = True
+                     )DOC")
+      .def_property(
+          "fused_attention",
+          [](const BuildStrategy &self) { return self.fused_attention_; },
+          [](BuildStrategy &self, bool b) {
+            PADDLE_ENFORCE_NE(self.IsFinalized(),
+                              true,
+                              platform::errors::PreconditionNotMet(
+                                  "BuildStrategy has been finlaized, cannot be "
+                                  "configured again."));
+            self.fused_attention_ = b;
+          },
+          R"DOC((bool, optional): fused_attention indicate whether
+                to fuse the whole multi head attention part with one op,
+                it may make the execution faster. Default is False.
+
+                Examples:
+                    .. code-block:: python
+
+                        import paddle
+                        import paddle.static as static
+
+                        paddle.enable_static()
+
+                        build_strategy = static.BuildStrategy()
+                        build_strategy.fused_attention = True
                      )DOC")
       .def_property(
           "fuse_bn_act_ops",

@@ -25,13 +25,11 @@ from paddle.fluid.incubate.fleet.base.role_maker import (
     UserDefinedRoleMaker,
 )
 from paddle.fluid.incubate.fleet.collective import CollectiveOptimizer
-from paddle.fluid.incubate.fleet.parameter_server import TranspilerOptimizer
-from paddle.fluid.incubate.fleet.parameter_server.distribute_transpiler import (
-    fleet,
-)
 from paddle.fluid.transpiler.distribute_transpiler import (
     DistributeTranspilerConfig,
 )
+from paddle.incubate.fleet.parameter_server import TranspilerOptimizer
+from paddle.incubate.fleet.parameter_server.distribute_transpiler import fleet
 
 
 class DistributeTranspilerConfigTest(unittest.TestCase):
@@ -61,7 +59,7 @@ class FleetTest(unittest.TestCase):
         self.assertRaises(Exception, fleet.split_files, "files")
         self.assertRaises(Exception, fleet.init, "pserver")
 
-        data = fluid.layers.data(name='X', shape=[1], dtype='float32')
+        data = paddle.static.data(name='X', shape=[-1, 1], dtype='float32')
         hidden = paddle.static.nn.fc(x=data, size=10)
         loss = paddle.mean(hidden)
         adam = fluid.optimizer.Adam()
@@ -176,7 +174,7 @@ class TranspilerOptimizerTest(unittest.TestCase):
 
         transpiler = TranspilerOptimizer(fluid.optimizer.Adam(0.001))
         self.assertRaises(Exception, transpiler.minimize, loss=[])
-        data = fluid.layers.data(name='X', shape=[1], dtype='float32')
+        data = paddle.static.data(name='X', shape=[-1, 1], dtype='float32')
         hidden = paddle.static.nn.fc(x=data, size=10)
         loss = paddle.mean(hidden)
         self.assertRaises(

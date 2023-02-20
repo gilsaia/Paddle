@@ -222,6 +222,12 @@ class OperatorDistAttr {
     execution_stream_ = execution_stream;
   }
 
+  int stream_priority() const { return stream_priority_; }
+
+  void set_stream_priority(int stream_priority) {
+    stream_priority_ = stream_priority;
+  }
+
   int64_t scheduling_priority() const { return scheduling_priority_; }
 
   void set_scheduling_priority(int64_t scheduling_priority) {
@@ -288,8 +294,9 @@ class OperatorDistAttr {
   std::string impl_type_ = kDefault;
   int64_t impl_idx_ = 0;
   bool is_recompute_ = false;
-  std::string execution_stream_;
-  int64_t scheduling_priority_;  // lower value, higher priority, default to 0
+  std::string execution_stream_ = kDefault;
+  int stream_priority_ = 0;          // lower value, higher priority
+  int64_t scheduling_priority_ = 0;  // lower value, higher priority
   std::map<std::string, bool> annotated_;
 };
 
