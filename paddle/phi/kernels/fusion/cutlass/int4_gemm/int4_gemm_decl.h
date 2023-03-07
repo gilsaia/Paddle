@@ -29,6 +29,8 @@ typedef struct {
   int m;
   int n;
   int k;
+  float alpha;
+  float beta;
   const phi::GPUContext *ctx;
 } GemmAllParams;
 
@@ -36,6 +38,7 @@ typedef struct {
 void Int4Gemm(GemmAllParams params, int sm);
 void Int4GemmBias(GemmAllParams params, int sm);
 void Int4GemmRelu(GemmAllParams params, int sm);
+void Int4GemmBiasRelu(GemmAllParams params, int sm);
 }  // namespace cutlass_gemm_internal
 }  // namespace fusion
 }  // namespace phi

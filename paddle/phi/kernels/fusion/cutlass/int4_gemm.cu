@@ -113,6 +113,8 @@ void Int4GemmKernel(const Context &ctx,
       m,
       n,
       kx,
+      1,
+      1,
       &ctx};
   if (activation == "none") {
     Int4GemmBias(params, sm);

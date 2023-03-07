@@ -31,7 +31,7 @@ template <typename TShape,
           int NumStages>
 cutlass::Status Int4GemmReluImpl(GemmAllParams params) {
   using ElementAccumulator = int32_t;
-  using ElementComputeEpilogue = int32_t;
+  using ElementComputeEpilogue = float;
   using ElementOutput = int32_t;
   using ElementInputA = cutlass::int4b_t;
   using ElementInputB = cutlass::int4b_t;
@@ -50,7 +50,8 @@ cutlass::Status Int4GemmReluImpl(GemmAllParams params) {
       ElementOutput,
       128 / cutlass::sizeof_bits<ElementOutput>::value,
       ElementAccumulator,
-      ElementComputeEpilogue>;
+      ElementComputeEpilogue,
+      cutlass::epilogue::thread::ScaleType::OnlyAlphaScaling>;
   using Gemm = cutlass::gemm::device::Gemm<ElementInputA,
                                            LayoutInputA,
                                            ElementInputB,
@@ -76,8 +77,8 @@ cutlass::Status Int4GemmReluImpl(GemmAllParams params) {
   int k = params.k;
   cutlass::gemm::GemmCoord problem_size({m, n, k});
 
-  ElementComputeEpilogue alpha = ElementComputeEpilogue(1);
-  ElementComputeEpilogue beta = ElementComputeEpilogue(1);
+  ElementComputeEpilogue alpha = ElementComputeEpilogue(params.alpha);
+  ElementComputeEpilogue beta = ElementComputeEpilogue(params.beta);
 
   int split_k_slices = 1;  // in big shape,no need to split k
 
