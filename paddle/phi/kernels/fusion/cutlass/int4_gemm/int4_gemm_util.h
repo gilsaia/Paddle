@@ -70,6 +70,12 @@ void ConvertDataToInt4(const T *source,
                        cutlass::int4b_t *output,
                        const size_t source_size);
 
+void ConvertDataToInt4WithScale(const int32_t *source,
+                                int32_t *extra,
+                                cutlass::int4b_t *output,
+                                const size_t source_size,
+                                float scale);
+
 template <typename Source, typename Target>
 void ConvertData(const Source *source,
                  Target *output,

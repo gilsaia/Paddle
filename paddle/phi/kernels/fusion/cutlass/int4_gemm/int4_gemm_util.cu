@@ -83,6 +83,12 @@ __global__ void DynamicConvert(Source const *s, Destination *t, int N) {
 template __global__ void DynamicConvert<int8_t, int32_t>(int32_t const *s,
                                                          int8_t *t,
                                                          int N);
+template __global__ void DynamicConvert<int32_t, int8_t>(int8_t const *s,
+                                                         int32_t *t,
+                                                         int N);
+template __global__ void DynamicConvert<int32_t, float>(float const *s,
+                                                        int32_t *t,
+                                                        int N);
 
 template <>
 __global__ void DynamicConvert<int32_t, int32_t>(int32_t const *s,
@@ -115,6 +121,31 @@ __global__ void DynamicConvert<cutlass::int4b_t, int32_t>(int32_t const *s,
   return;
 }
 
+__global__ void DynamicConvertWithScale(const int32_t *s,
+                                        int32_t *s_extra,
+                                        cutlass::int4b_t *t,
+                                        int N,
+                                        float scale) {
+  cutlass::NumericArrayConverter<cutlass::int4b_t, int, 8> converter;
+
+  cutlass::Array<cutlass::int4b_t, 8> *result_ptr =
+      reinterpret_cast<cutlass::Array<cutlass::int4b_t, 8> *>(t);
+  cutlass::Array<int, 8> *source_ptr =
+      reinterpret_cast<cutlass::Array<int, 8> *>(s_extra);
+
+  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  CUTLASS_PRAGMA_UNROLL
+  for (int i = idx; i < N / 8; i += gridDim.x * blockDim.x) {
+#pragma unroll
+    for (int j = 0; j < 8; ++j) {
+      s_extra[i * 8 + j] =
+          __float2int_rn(__fdiv_rn(__int2float_rn(s[i * 8 + j]), scale));
+    }
+    result_ptr[i] = converter(source_ptr[i]);
+  }
+  return;
+}
+
 template <typename T>
 __global__ void ExpendKernel(
     const T *vector, T *matrix, const int n, const int m, const int col_major) {
@@ -126,12 +157,20 @@ __global__ void ExpendKernel(
       idx += blockDim.x;
     }
   } else {
-    int idx = threadIdx.x + blockDim.x * blockIdx.x;
-    T myval = vector[idx % n];
-    while (idx < m * n) {
-      matrix[idx] = myval;
-      idx += gridDim.x * blockDim.x;
+    for (int i = 0; i < n / blockDim.x; ++i) {
+      int idx = threadIdx.x + blockDim.x * i + n * blockIdx.x;
+      T myval = vector[idx % n];
+      while (idx < m * n) {
+        matrix[idx] = myval;
+        idx += n * gridDim.x;
+      }
     }
+    // int idx = threadIdx.x + blockDim.x * blockIdx.x;
+    // T myval = vector[idx % n];
+    // while (idx < m * n) {
+    //   matrix[idx] = myval;
+    //   idx += gridDim.x * blockDim.x;
+    // }
   }
 }
 
@@ -140,6 +179,16 @@ template __global__ void ExpendKernel<int32_t>(const int32_t *vector,
                                                const int n,
                                                const int m,
                                                const int col_major);
+template __global__ void ExpendKernel<float>(const float *vector,
+                                             float *matrix,
+                                             const int n,
+                                             const int m,
+                                             const int col_major);
+template __global__ void ExpendKernel<half>(const half *vector,
+                                            half *matrix,
+                                            const int n,
+                                            const int m,
+                                            const int col_major);
 
 template <typename T, typename Context>
 void ConvertDataToInt4(const Context &ctx,
@@ -176,7 +225,7 @@ template <typename T>
 void ConvertDataToInt4(const T *source,
                        cutlass::int4b_t *output,
                        const size_t source_size) {
-  constexpr int block_ = 256;
+  constexpr int block_ = 512;
   dim3 grid((source_size + block_ - 1) / block_);
   dim3 block(block_);
   DynamicConvert<cutlass::int4b_t, T>
@@ -184,16 +233,56 @@ void ConvertDataToInt4(const T *source,
   return;
 }
 
+// template void ConvertDataToInt4<signed char>(const signed char *source,
+//                                              cutlass::int4b_t *output,
+//                                              const size_t source_size);
+// template void ConvertDataToInt4<cutlass::half_t>(const cutlass::half_t
+// *source,
+//                                                  cutlass::int4b_t *output,
+//                                                  const size_t source_size);
+// template void ConvertDataToInt4<float>(const float *source,
+//                                        cutlass::int4b_t *output,
+//                                        const size_t source_size);
+template void ConvertDataToInt4<int32_t>(const int32_t *source,
+                                         cutlass::int4b_t *output,
+                                         const size_t source_size);
+
+void ConvertDataToInt4WithScale(const int32_t *source,
+                                int32_t *extra,
+                                cutlass::int4b_t *output,
+                                const size_t source_size,
+                                float scale) {
+  constexpr int block_ = 512;
+  dim3 grid((source_size + block_ - 1) / block_);
+  dim3 block(block_);
+  DynamicConvertWithScale<<<grid, block>>>(
+      source, extra, output, source_size, scale);
+  return;
+}
+
 template <typename Source, typename Target>
 void ConvertData(const Source *source,
                  Target *output,
                  const size_t source_size) {
-  constexpr int block_ = 256;
+  constexpr int block_ = 512;
   dim3 grid((source_size + block_ - 1) / block_);
   dim3 block(block_);
   DynamicConvert<Target, Source><<<grid, block>>>(source, output, source_size);
   return;
 }
+
+template void ConvertData<int8_t, int>(const int8_t *source,
+                                       int *output,
+                                       const size_t source_size);
+template void ConvertData<cutlass::half_t, int>(const cutlass::half_t *source,
+                                                int *output,
+                                                const size_t source_size);
+template void ConvertData<float, int>(const float *source,
+                                      int *output,
+                                      const size_t source_size);
+template void ConvertData<int, int>(const int *source,
+                                    int *output,
+                                    const size_t source_size);
 
 }  // namespace cutlass_gemm_internal
 }  // namespace fusion
