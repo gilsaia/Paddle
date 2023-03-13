@@ -233,19 +233,88 @@ void ConvertDataToInt4(const T *source,
   return;
 }
 
-// template void ConvertDataToInt4<signed char>(const signed char *source,
-//                                              cutlass::int4b_t *output,
-//                                              const size_t source_size);
-// template void ConvertDataToInt4<cutlass::half_t>(const cutlass::half_t
-// *source,
-//                                                  cutlass::int4b_t *output,
-//                                                  const size_t source_size);
-// template void ConvertDataToInt4<float>(const float *source,
-//                                        cutlass::int4b_t *output,
-//                                        const size_t source_size);
 template void ConvertDataToInt4<int32_t>(const int32_t *source,
                                          cutlass::int4b_t *output,
                                          const size_t source_size);
+
+static inline __device__ uint32_t char8_to_int4b8(int8_t a,
+                                                  int8_t b,
+                                                  int8_t c,
+                                                  int8_t d,
+                                                  int8_t e,
+                                                  int8_t f,
+                                                  int8_t g,
+                                                  int8_t h) {
+  uint32_t dst;
+
+  uint32_t at;
+  asm volatile("cvt.s32.s8 %0,%1;\n" : "=r"(at) : "h"(int16_t(a)));
+  uint32_t bt;
+  asm volatile("cvt.s32.s8 %0,%1;\n" : "=r"(bt) : "h"(int16_t(b)));
+  uint32_t ct;
+  asm volatile("cvt.s32.s8 %0,%1;\n" : "=r"(ct) : "h"(int16_t(c)));
+  uint32_t dt;
+  asm volatile("cvt.s32.s8 %0,%1;\n" : "=r"(dt) : "h"(int16_t(d)));
+  uint32_t et;
+  asm volatile("cvt.s32.s8 %0,%1;\n" : "=r"(et) : "h"(int16_t(e)));
+  uint32_t ft;
+  asm volatile("cvt.s32.s8 %0,%1;\n" : "=r"(ft) : "h"(int16_t(f)));
+  uint32_t gt;
+  asm volatile("cvt.s32.s8 %0,%1;\n" : "=r"(gt) : "h"(int16_t(g)));
+  uint32_t ht;
+  asm volatile("cvt.s32.s8 %0,%1;\n" : "=r"(ht) : "h"(int16_t(h)));
+
+  asm volatile(
+      "{ .reg .u32 r4;"
+      "cvt.pack.sat.s4.s32.b32 r4,%8,%7,0;"
+      "cvt.pack.sat.s4.s32.b32 r4,%6,%5,r4;"
+      "cvt.pack.sat.s4.s32.b32 r4,%4,%3,r4;"
+      "cvt.pack.sat.s4.s32.b32 %0,%2,%1,r4;"
+      "}"
+      : "=r"(dst)
+      : "r"(at), "r"(bt), "r"(ct), "r"(dt), "r"(et), "r"(ft), "r"(gt), "r"(ht));
+  return dst;
+}
+
+__global__ void convertInt8ToInt4(const int8_t *source,
+                                  cutlass::int4b_t *target,
+                                  const size_t source_size) {
+  constexpr int32_t VPT = 16;
+  int8_t *target_seg = reinterpret_cast<int8_t *>(target);
+  const int32_t idx = (blockIdx.x * blockDim.x + threadIdx.x) * VPT;
+  int8_t source_local[VPT];
+  for (int i = idx; i < source_size; i += blockDim.x * gridDim.x * VPT) {
+#pragma unroll
+    for (int it = 0; it < VPT / 8; ++it) {
+      *reinterpret_cast<uint64_t *>(&source_local[it * 8]) =
+          *reinterpret_cast<const uint64_t *>(&source[i + it * 8]);
+    }
+    uint32_t out_local[VPT / 8];
+#pragma unroll
+    for (int it = 0; it < VPT / 8; ++it) {
+      out_local[it] = char8_to_int4b8(source_local[it * 8 + 0],
+                                      source_local[it * 8 + 1],
+                                      source_local[it * 8 + 2],
+                                      source_local[it * 8 + 3],
+                                      source_local[it * 8 + 4],
+                                      source_local[it * 8 + 5],
+                                      source_local[it * 8 + 6],
+                                      source_local[it * 8 + 7]);
+    }
+    *reinterpret_cast<uint64_t *>(&target_seg[i / 2]) =
+        *reinterpret_cast<uint64_t *>(out_local);
+  }
+}
+
+template <>
+void ConvertDataToInt4<int8_t>(const int8_t *source,
+                               cutlass::int4b_t *output,
+                               const size_t source_size) {
+  constexpr int block_ = 8;
+  dim3 grid(1024 / block_);
+  dim3 block(block_);
+  convertInt8ToInt4<<<grid, block>>>(source, output, source_size);
+}
 
 void ConvertDataToInt4WithScale(const int32_t *source,
                                 int32_t *extra,
@@ -260,6 +329,45 @@ void ConvertDataToInt4WithScale(const int32_t *source,
   return;
 }
 
+static inline __device__ uint32_t int4_to_char4(int32_t a,
+                                                int32_t b,
+                                                int32_t c,
+                                                int32_t d) {
+  uint32_t dst;
+  asm volatile("cvt.pack.sat.s8.s32.b32 %0,%1,%2,0;\n"
+               : "=r"(dst)
+               : "r"(d), "r"(c));
+  asm volatile("cvt.pack.sat.s8.s32.b32 %0,%1,%2,%0;\n"
+               : "+r"(dst)
+               : "r"(b), "r"(a));
+  return dst;
+}
+
+__global__ void convertInt32ToInt8(const int32_t *source,
+                                   int8_t *target,
+                                   const size_t size) {
+  constexpr int32_t VPT = 8;
+  const int32_t idx = (blockIdx.x * blockDim.x + threadIdx.x) * VPT;
+  int32_t source_local[VPT];
+  for (int i = idx; i < size; i += blockDim.x * gridDim.x * VPT) {
+#pragma unroll
+    for (int it = 0; it < VPT / 2; ++it) {
+      *reinterpret_cast<uint64_t *>(&source_local[it * 2]) =
+          *reinterpret_cast<const uint64_t *>(&source[i + it * 2]);
+    }
+    uint32_t out_local[VPT / 4];
+#pragma unroll
+    for (int it = 0; it < VPT / 4; ++it) {
+      out_local[it] = int4_to_char4(source_local[it * 4 + 0],
+                                    source_local[it * 4 + 1],
+                                    source_local[it * 4 + 2],
+                                    source_local[it * 4 + 3]);
+    }
+    *reinterpret_cast<uint64_t *>(&target[i]) =
+        *reinterpret_cast<uint64_t *>(out_local);
+  }
+}
+
 template <typename Source, typename Target>
 void ConvertData(const Source *source,
                  Target *output,
@@ -269,6 +377,16 @@ void ConvertData(const Source *source,
   dim3 block(block_);
   DynamicConvert<Target, Source><<<grid, block>>>(source, output, source_size);
   return;
+}
+
+template <>
+void ConvertData<int32_t, int8_t>(const int32_t *source,
+                                  int8_t *output,
+                                  const size_t source_size) {
+  constexpr int block_ = 8;
+  dim3 grid(1024 / block_);
+  dim3 block(block_);
+  convertInt32ToInt8<<<grid, block>>>(source, output, source_size);
 }
 
 template void ConvertData<int8_t, int>(const int8_t *source,

@@ -77,9 +77,12 @@ MatmulInt4Plugin::MatmulInt4Plugin(nvinfer1::Dims const& dims_x,
                                    float scale_x,
                                    nvinfer1::Dims const& dims_y,
                                    nvinfer1::DataType type_y,
+                                   float scale_y,
                                    Int4GemmActivationType activation_type,
                                    bool with_bias,
                                    nvinfer1::DataType type_bias,
+                                   float scale_bias,
+                                   float scale_out,
                                    void* y,
                                    void* bias)
     : dims_x_(dims_x),
@@ -87,9 +90,12 @@ MatmulInt4Plugin::MatmulInt4Plugin(nvinfer1::Dims const& dims_x,
       scale_x_(scale_x),
       type_x_(type_x),
       type_y_(type_y),
+      scale_y_(scale_y),
       activation_type_(activation_type),
       with_bias_(with_bias),
       type_bias_(type_bias),
+      scale_bias_(scale_bias),
+      scale_out_(scale_out),
       y_device_(y),
       bias_device_(bias) {
   m_ = dims_x.d[dims_x.nbDims - 2];
@@ -148,6 +154,17 @@ MatmulInt4Plugin::MatmulInt4Plugin(nvinfer1::Dims const& dims_x,
           static_cast<int32_t*>(bias_device_), bias_convert_, m_ * n_);
     }
   }
+
+  int32_t* debug = reinterpret_cast<int32_t*>(malloc(k_ * n_ * 4));
+  std::cout << "in construct weight print" << std::endl;
+  cudaMemcpy(debug, y_extra_, k_ * n_ * 4, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < n_; ++j) {
+      std::cout << debug[i * n_ + j] << " ";
+    }
+    std::cout << std::endl;
+  }
+  free(debug);
 }
 
 MatmulInt4Plugin::MatmulInt4Plugin(void const* data, size_t length) {
@@ -156,9 +173,12 @@ MatmulInt4Plugin::MatmulInt4Plugin(void const* data, size_t length) {
   DeserializeValue(&data, &length, &type_x_);
   DeserializeValue(&data, &length, &type_y_);
   DeserializeValue(&data, &length, &scale_x_);
+  DeserializeValue(&data, &length, &scale_y_);
   DeserializeValue(&data, &length, &activation_type_);
   DeserializeValue(&data, &length, &with_bias_);
   DeserializeValue(&data, &length, &type_bias_);
+  DeserializeValue(&data, &length, &scale_bias_);
+  DeserializeValue(&data, &length, &scale_out_);
   DeserializeValue(&data, &length, &batch_);
   DeserializeValue(&data, &length, &m_);
   DeserializeValue(&data, &length, &n_);
@@ -240,17 +260,20 @@ bool MatmulInt4Plugin::supportsFormatCombination(
     //         in_out[pos].type == nvinfer1::DataType::kFLOAT ||
     //         in_out[pos].type == nvinfer1::DataType::kINT32) &&
     //        in_out[pos].format == nvinfer1::TensorFormat::kLINEAR;
-    return in_out[pos].type == nvinfer1::DataType::kINT32 &&
+    return in_out[pos].type == nvinfer1::DataType::kINT8 &&
+           in_out[pos].format == nvinfer1::TensorFormat::kLINEAR;
+  } else if (pos == 1) {
+    return in_out[pos].type == nvinfer1::DataType::kINT8 &&
            in_out[pos].format == nvinfer1::TensorFormat::kLINEAR;
   }
-  return true;
+  return false;
 }
 
 nvinfer1::DataType MatmulInt4Plugin::getOutputDataType(
     int32_t index,
     nvinfer1::DataType const* input_types,
     int32_t nb_inputs) const noexcept {
-  return nvinfer1::DataType::kINT32;
+  return nvinfer1::DataType::kINT8;
 }
 
 void MatmulInt4Plugin::attachToContext(
@@ -272,9 +295,12 @@ nvinfer1::IPluginV2DynamicExt* MatmulInt4Plugin::clone() const noexcept {
                                 scale_x_,
                                 dims_y_,
                                 type_y_,
+                                scale_y_,
                                 activation_type_,
                                 with_bias_,
                                 type_bias_,
+                                scale_bias_,
+                                scale_out_,
                                 y_device_,
                                 bias_device_);
   cudaDeviceSynchronize();
@@ -302,11 +328,6 @@ nvinfer1::DimsExprs MatmulInt4Plugin::getOutputDimensions(
     nvinfer1::DimsExprs const* inputs,
     int32_t nb_inputs,
     nvinfer1::IExprBuilder& expr_builder) noexcept {
-  std::cout << "get output demision input demision " << inputs[0].nbDims;
-  for (int i = 0; i < inputs[0].nbDims; ++i) {
-    std::cout << " " << inputs[0].d[i];
-  }
-  std::cout << std::endl;
   nvinfer1::DimsExprs output_dims;
   output_dims.nbDims = inputs[0].nbDims;
   for (int i = 0; i < inputs[0].nbDims - 1; ++i) {
@@ -349,9 +370,9 @@ void MatmulInt4Plugin::terminate() noexcept {
   //   std::cout << "before Cr wrong"
   //             << " " << cudaGetErrorString(error) << std::endl;
   // }
-  cudaFree(y_device_);
+  // cudaFree(y_device_);
   if (with_bias_) {
-    cudaFree(bias_device_);
+    // cudaFree(bias_device_);
     cudaFree(reinterpret_cast<void*>(bias_convert_));
   }
 
@@ -377,7 +398,9 @@ size_t MatmulInt4Plugin::getSerializationSize() const noexcept {
          SerializedSize(type_bias_) + SerializedSize(activation_type_) +
          SerializedSize(with_bias_) + SerializedSize(batch_) +
          SerializedSize(m_) + SerializedSize(n_) + SerializedSize(k_) +
-         SerializedSize(scale_x_) + n_ * k_ * sizeof(type_y_) +
+         SerializedSize(scale_x_) + SerializedSize(scale_y_) +
+         SerializedSize(scale_bias_) + SerializedSize(scale_out_) +
+         n_ * k_ * sizeof(type_y_) +
          (with_bias_ ? m_ * n_ * sizeof(type_bias_) : 0);
 }
 
@@ -394,9 +417,12 @@ void MatmulInt4Plugin::serialize(void* buffer) const noexcept {
   SerializeValue(&buffer, type_x_);
   SerializeValue(&buffer, type_y_);
   SerializeValue(&buffer, scale_x_);
+  SerializeValue(&buffer, scale_y_);
   SerializeValue(&buffer, activation_type_);
   SerializeValue(&buffer, with_bias_);
   SerializeValue(&buffer, type_bias_);
+  SerializeValue(&buffer, scale_bias_);
+  SerializeValue(&buffer, scale_out_);
   SerializeValue(&buffer, batch_);
   SerializeValue(&buffer, m_);
   SerializeValue(&buffer, n_);
@@ -442,24 +468,26 @@ int32_t MatmulInt4Plugin::enqueue(nvinfer1::PluginTensorDesc const* input_desc,
 
   auto dims_x = input_desc[0].dims;
   m_ = dims_x.d[dims_x.nbDims - 2];
+  float scale_alpha = scale_x_ * scale_y_;
+  float scale_beta = scale_bias_;
 
-  const int32_t* x = static_cast<const int32_t*>(inputs[0]);
-  // phi::fusion::cutlass_gemm_internal::ConvertDataToInt4<int32_t>(
-  //     x, x_convert_, m_ * k_);
-  phi::fusion::cutlass_gemm_internal::ConvertDataToInt4WithScale(
-      x, x_extra_, x_convert_, m_ * k_, scale_x_);
+  const int8_t* x = static_cast<const int8_t*>(inputs[0]);
+  phi::fusion::cutlass_gemm_internal::ConvertDataToInt4<int8_t>(
+      x, x_convert_, m_ * k_);
+  // phi::fusion::cutlass_gemm_internal::ConvertDataToInt4WithScale(
+  //     x, x_extra_, x_convert_, m_ * k_, scale_x_);
 
-  auto* res = static_cast<int32_t*>(outputs[0]);
+  // auto* res = static_cast<int32_t*>(outputs[0]);
   phi::fusion::cutlass_gemm_internal::GemmAllParams params{x_convert_,
                                                            y_convert_,
                                                            bias_convert_,
-                                                           res,
+                                                           res_,
                                                            batch_,
                                                            m_,
                                                            n_,
                                                            k_,
-                                                           scale_x_,
-                                                           1,
+                                                           scale_alpha,
+                                                           scale_beta,
                                                            &dev_ctx};
   int sm = phi::fusion::cutlass_gemm_internal::getSMVersion();
   if (activation_type_ == INT4_GEMM_ACTIVATION_TYPE_NONE) {
@@ -474,6 +502,82 @@ int32_t MatmulInt4Plugin::enqueue(nvinfer1::PluginTensorDesc const* input_desc,
     // should not in here
     phi::fusion::cutlass_gemm_internal::Int4Gemm(params, sm);
   }
+
+  auto* res = static_cast<int8_t*>(outputs[0]);
+  phi::fusion::cutlass_gemm_internal::ConvertData<int32_t, int8_t>(
+      res_, res, m_ * n_);
+
+  std::cout << "input scale " << scale_x_ << "output scale" << scale_out_
+            << "weight scale" << scale_y_ << "bias scale" << scale_bias_
+            << "alpha scale" << scale_alpha << "beta scale" << scale_beta
+            << std::endl;
+  int8_t* debug_input = reinterpret_cast<int8_t*>(malloc(m_ * k_));
+  std::cout << "input print" << std::endl;
+  cudaMemcpy(debug_input, x, m_ * k_, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < k_; ++j) {
+      std::cout << std::hex << int(debug_input[i * k_ + j]) << " ";
+    }
+    std::cout << std::endl;
+  }
+  free(debug_input);
+
+  int8_t* debug_input_convert = reinterpret_cast<int8_t*>(malloc(m_ * k_ / 2));
+  std::cout << "input convert  print" << std::endl;
+  cudaMemcpy(
+      debug_input_convert, x_convert_, m_ * k_ / 2, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < k_ / 2; ++j) {
+      std::cout << std::hex << int(debug_input_convert[i * k_ / 2 + j]) << " ";
+    }
+    std::cout << std::dec << std::endl;
+  }
+  free(debug_input_convert);
+
+  int32_t* debug_weight = reinterpret_cast<int32_t*>(malloc(k_ * n_ * 4));
+  std::cout << "weight print" << std::endl;
+  cudaMemcpy(debug_weight, y_extra_, k_ * n_ * 4, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < n_; ++j) {
+      std::cout << debug_weight[i * n_ + j] << " ";
+    }
+    std::cout << std::endl;
+  }
+  free(debug_weight);
+
+  int32_t* debug_bias = reinterpret_cast<int32_t*>(malloc(m_ * n_ * 4));
+  std::cout << "bias print" << std::endl;
+  cudaMemcpy(debug_bias, bias_convert_, m_ * n_ * 4, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < n_; ++j) {
+      std::cout << debug_bias[i * n_ + j] << " ";
+    }
+    std::cout << std::endl;
+  }
+  free(debug_bias);
+
+  int32_t* debug = reinterpret_cast<int32_t*>(malloc(m_ * n_ * 4));
+  std::cout << "output print" << std::endl;
+  cudaMemcpy(debug, res_, m_ * n_ * 4, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < n_; ++j) {
+      std::cout << debug[i * n_ + j] << " ";
+    }
+    std::cout << std::endl;
+  }
+  free(debug);
+
+  int8_t* debug_res = reinterpret_cast<int8_t*>(malloc(m_ * n_));
+  std::cout << "output convert print" << std::endl;
+  cudaMemcpy(debug_res, res, m_ * n_, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < n_; ++j) {
+      std::cout << int(debug_res[i * n_ + j]) << " ";
+    }
+    std::cout << std::endl;
+  }
+  free(debug_res);
+
   // auto* res = static_cast<__half*>(outputs[0]);
   // phi::fusion::cutlass_gemm_internal::ConvertData<int32_t, __half>(
   //     res_, res, m_ * n_);
@@ -524,6 +628,32 @@ char const* MatmulInt4PluginCreator::getPluginNamespace() const noexcept {
   return plugin_namespace_.c_str();
 }
 
+float convertWeightFindScale(float* weight, size_t size, int range_size) {
+  float w_min = weight[0], w_max = weight[0];
+  for (size_t i = 1; i < size; ++i) {
+    w_min = std::min(w_min, weight[i]);
+    w_max = std::max(w_max, weight[i]);
+  }
+  float scale = (w_max - w_min) / range_size;
+  for (size_t i = 0; i < size; ++i) {
+    weight[i] /= scale;
+  }
+  return scale;
+}
+
+float convertWeightFindScale(half* weight, size_t size, int range_size) {
+  float w_min = weight[0], w_max = weight[0];
+  for (size_t i = 1; i < size; ++i) {
+    w_min = std::min(w_min, __half2float(weight[i]));
+    w_max = std::max(w_max, __half2float(weight[i]));
+  }
+  float scale = w_max - w_min / range_size;
+  for (size_t i = 0; i < size; ++i) {
+    weight[i] = __float2half(__half2float(weight[i]) / scale);
+  }
+  return scale;
+}
+
 nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
     char const* name, const nvinfer1::PluginFieldCollection* fc) noexcept {
   std::cout << "in create plugin" << std::endl;
@@ -535,7 +665,7 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
   }
   nvinfer1::Dims dims_x, dims_y;
   nvinfer1::DataType x_type, y_type, bias_type;
-  float scale_x;
+  float scale_x, scale_y, scale_bias, scale_out;
   Int4GemmActivationType activation_type;
   bool with_bias = false;
   void *y, *bias = nullptr;
@@ -560,6 +690,8 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
           reinterpret_cast<const nvinfer1::DataType*>(fc->fields[i].data)[0];
     } else if (field_name.compare("scale_x") == 0) {
       scale_x = reinterpret_cast<const float*>(fc->fields[i].data)[0];
+    } else if (field_name.compare("scale_out") == 0) {
+      scale_out = reinterpret_cast<const float*>(fc->fields[i].data)[0];
     } else if (field_name.compare("activation_type") == 0) {
       activation_type = reinterpret_cast<const Int4GemmActivationType*>(
           fc->fields[i].data)[0];
@@ -571,28 +703,47 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
       std::cout << "Y data size:" << fc->fields[i].length
                 << " compute size:" << k * n << " byte size:" << sizeof(y_type)
                 << std::endl;
+      if (y_type == nvinfer1::DataType::kHALF) {
+        scale_y = convertWeightFindScale(
+            reinterpret_cast<half*>(y_ori), fc->fields[i].length, 127);
+      } else if (y_type == nvinfer1::DataType::kFLOAT) {
+        scale_y = convertWeightFindScale(
+            reinterpret_cast<float*>(y_ori), fc->fields[i].length, 127);
+      }
+      float* debug = reinterpret_cast<float*>(y_ori);
+      std::cout << "create plugin weight print" << std::endl;
+      // cudaMemcpy(debug, res, m_ * n_ * 4, cudaMemcpyDeviceToHost);
+      for (int i = 0; i < 20; ++i) {
+        for (int j = 0; j < n; ++j) {
+          std::cout << debug[i * n + j] << " ";
+        }
+        std::cout << std::endl;
+      }
+      // free(debug);
+
       cudaMalloc(&y, k * n * sizeof(y_type));
       cudaMemcpy(y, y_ori, k * n * sizeof(y_type), cudaMemcpyHostToDevice);
-      cudaDeviceSynchronize();
-      cudaError_t error = cudaGetLastError();
-      if (error != cudaSuccess) {
-        std::cout << "after cpy y wrong"
-                  << " " << cudaGetErrorString(error) << std::endl;
-      }
     } else if (field_name.compare("bias") == 0) {
       void* bias_ori = const_cast<void*>(fc->fields[i].data);
+      if (bias_type == nvinfer1::DataType::kFLOAT) {
+        scale_bias = convertWeightFindScale(
+            reinterpret_cast<float*>(bias_ori), fc->fields[i].length, 127);
+      } else if (bias_type == nvinfer1::DataType::kHALF) {
+        scale_bias = convertWeightFindScale(
+            reinterpret_cast<half*>(bias_ori), fc->fields[i].length, 127);
+      }
+      std::cout << "create plugin bias print" << std::endl;
+      // cudaMemcpy(debug, res, m_ * n_ * 4, cudaMemcpyDeviceToHost);
+      for (int j = 0; j < fc->fields[i].length; ++j) {
+        std::cout << reinterpret_cast<float*>(bias_ori)[j] << " ";
+      }
+      std::cout << std::endl;
       void* bias_device_ori;
       cudaMalloc(&bias_device_ori, fc->fields[i].length * sizeof(bias_type));
       cudaMemcpy(bias_device_ori,
                  bias_ori,
                  fc->fields[i].length * sizeof(bias_type),
                  cudaMemcpyHostToDevice);
-      cudaDeviceSynchronize();
-      cudaError_t error = cudaGetLastError();
-      if (error != cudaSuccess) {
-        std::cout << "after bias cmp wrong"
-                  << " " << cudaGetErrorString(error) << std::endl;
-      }
       cudaMalloc(&bias, m * n * sizeof(bias_type));
       dim3 gridb(128);
       dim3 blockb(768);
@@ -623,14 +774,6 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
       std::cout << "bias expend m" << m << " n " << n << " bias type"
                 << int32_t(bias_type) << " bias byte" << sizeof(bias_type)
                 << std::endl;
-      cudaDeviceSynchronize();
-      error = cudaGetLastError();
-      if (error != cudaSuccess) {
-        std::cout << "after expend bias wrong"
-                  << " " << cudaGetErrorString(error)
-                  << " bias type:" << int32_t(bias_type) << " m " << m << " n "
-                  << n << std::endl;
-      }
     }
   }
   MatmulInt4Plugin* p = new MatmulInt4Plugin(dims_x,
@@ -638,9 +781,12 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
                                              scale_x,
                                              dims_y,
                                              y_type,
+                                             scale_y,
                                              activation_type,
                                              with_bias,
                                              bias_type,
+                                             scale_bias,
+                                             scale_out,
                                              y,
                                              bias);
   cudaDeviceSynchronize();

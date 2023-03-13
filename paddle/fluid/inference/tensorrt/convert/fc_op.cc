@@ -45,8 +45,8 @@ class FcOpConverter : public OpConverter {
   void int4_plug(const framework::proto::OpDesc& op,
                  const framework::Scope& scope,
                  bool test_mode,
-                 const TensorRTEngine::Weight& weight,
-                 const TensorRTEngine::Weight& bias,
+                 TensorRTEngine::Weight* weight,
+                 TensorRTEngine::Weight* bias,
                  int m,
                  int n,
                  nvinfer1::ITensor* inputs,
@@ -55,7 +55,8 @@ class FcOpConverter : public OpConverter {
                  float in_scale,
                  float out_scale) {
     VLOG(3) << "convert a int4 matmul op to cutlass int4 plugin";
-    std::cout << "in matmul int4" << std::endl;
+    std::cout << "in matmul int4 x scale" << in_scale << " out scale "
+              << out_scale << std::endl;
     framework::OpDesc op_desc(op, nullptr);
 
     // Declare inputs
@@ -81,9 +82,9 @@ class FcOpConverter : public OpConverter {
     // }
     auto output_name = op_desc.Output("Out").front();
 
-    auto* input_convert_layer =
-        TRT_ENGINE_ADD_LAYER(engine_, Identity, *input1);
-    input_convert_layer->setOutputType(0, nvinfer1::DataType::kINT32);
+    // auto* input_convert_layer =
+    //     TRT_ENGINE_ADD_LAYER(engine_, Identity, *input1);
+    // input_convert_layer->setOutputType(0, nvinfer1::DataType::kINT32);
 
     std::vector<nvinfer1::ITensor*> plugin_inputs;
     // if (transpose_X) {
@@ -104,7 +105,7 @@ class FcOpConverter : public OpConverter {
     // } else {
     //   plugin_inputs.push_back(input1);
     // }
-    plugin_inputs.push_back(input_convert_layer->getOutput(0));
+    plugin_inputs.push_back(input1);
     // if (!transpose_Y) {
     //   // cutlass int4 gemm need y in column major,so the action on y is
     //   opposite nvinfer1::Permutation permutation; for (int i = 0; i <
@@ -132,42 +133,42 @@ class FcOpConverter : public OpConverter {
     if (op_desc.HasAttr("transpose_Y")) {
       transpose_y = PADDLE_GET_CONST(bool, op_desc.GetAttr("transpose_Y"));
     }
-    auto& weight_t = weight.get();
+    auto& weight_t = weight->get();
     nvinfer1::Dims dims_y;
     dims_y.nbDims = 2;
     if (!transpose_y) {
-      dims_y.d[0] = weight.dims[1];
-      dims_y.d[1] = weight.dims[0];
-      if (weight.get().type == nvinfer1::DataType::kFLOAT) {
-        std::vector<float> weight_data_tmp;
-        weight_data_tmp.reserve(weight_t.count);
-        memcpy(weight_data_tmp.data(),
-               weight.get().values,
-               weight_t.count * sizeof(float));
-        tranpose_weight(
-            weight_data_tmp.data(),
-            const_cast<float*>(static_cast<const float*>(weight.get().values)),
-            dims_y.d[0],
-            dims_y.d[1]);
-      } else if (weight.get().type == nvinfer1::DataType::kHALF) {
-        std::vector<float16> weight_data_tmp;
-        weight_data_tmp.reserve(weight_t.count);
-        memcpy(weight_data_tmp.data(),
-               weight.get().values,
-               weight_t.count * sizeof(float16));
-        tranpose_weight(weight_data_tmp.data(),
-                        const_cast<float16*>(
-                            static_cast<const float16*>(weight.get().values)),
-                        dims_y.d[0],
-                        dims_y.d[1]);
-      }
+      dims_y.d[0] = weight->dims[1];
+      dims_y.d[1] = weight->dims[0];
+      // if (weight.get().type == nvinfer1::DataType::kFLOAT) {
+      //   std::vector<float> weight_data_tmp;
+      //   weight_data_tmp.reserve(weight_t.count);
+      //   memcpy(weight_data_tmp.data(),
+      //          weight.get().values,
+      //          weight_t.count * sizeof(float));
+      //   tranpose_weight(
+      //       weight_data_tmp.data(),
+      //       const_cast<float*>(static_cast<const
+      //       float*>(weight.get().values)), dims_y.d[0], dims_y.d[1]);
+      // } else if (weight.get().type == nvinfer1::DataType::kHALF) {
+      //   std::vector<float16> weight_data_tmp;
+      //   weight_data_tmp.reserve(weight_t.count);
+      //   memcpy(weight_data_tmp.data(),
+      //          weight.get().values,
+      //          weight_t.count * sizeof(float16));
+      //   tranpose_weight(weight_data_tmp.data(),
+      //                   const_cast<float16*>(
+      //                       static_cast<const
+      //                       float16*>(weight.get().values)),
+      //                   dims_y.d[0],
+      //                   dims_y.d[1]);
+      // }
     } else {
-      dims_y.d[0] = weight.dims[0];
-      dims_y.d[1] = weight.dims[1];
+      dims_y.d[0] = weight->dims[0];
+      dims_y.d[1] = weight->dims[1];
     }
     auto activation = paddle::inference::tensorrt::plugin::
         Int4GemmActivationType::INT4_GEMM_ACTIVATION_TYPE_NONE;
-    bool with_bias = bias.get().values != nullptr;
+    bool with_bias = bias->get().values != nullptr;
     if (activation_type.compare("relu") == 0) {
       if (with_bias) {
         activation = paddle::inference::tensorrt::plugin::
@@ -199,15 +200,19 @@ class FcOpConverter : public OpConverter {
                         weight_t.values,
                         GetPluginFieldType(weight_t.type),
                         weight_t.count);
+    fields.emplace_back(
+        "scale_x", &in_scale, nvinfer1::PluginFieldType::kFLOAT32, 1);
+    fields.emplace_back(
+        "scale_out", &out_scale, nvinfer1::PluginFieldType::kFLOAT32, 1);
     if (with_bias) {
       fields.emplace_back(
           "with_bias", &with_bias, nvinfer1::PluginFieldType::kINT32, 1);
       fields.emplace_back(
-          "type_bias", &bias.get().type, nvinfer1::PluginFieldType::kINT32, 1);
+          "type_bias", &bias->get().type, nvinfer1::PluginFieldType::kINT32, 1);
       fields.emplace_back("bias",
-                          bias.get().values,
-                          GetPluginFieldType(bias.get().type),
-                          bias.get().count);
+                          bias->get().values,
+                          GetPluginFieldType(bias->get().type),
+                          bias->get().count);
     }
     // fields.emplace_back("dims_y", &dims_y,
     // nvinfer1::PluginFieldType::kDIMS, 1);
@@ -239,16 +244,24 @@ class FcOpConverter : public OpConverter {
 
     std::cout << "end create plugin" << std::endl;
 
-    plugin_layer->setName(
-        ("matmul_int4: (Output: " + output_name + "_int32" + ")").c_str());
-    engine_->SetITensor(output_name + "_int32", plugin_layer->getOutput(0));
+    // plugin_layer->setName(
+    //     ("matmul_int4: (Output: " + output_name + "_int32" + ")").c_str());
+    // engine_->SetITensor(output_name + "_int32", plugin_layer->getOutput(0));
 
-    auto* identity_layer =
-        TRT_ENGINE_ADD_LAYER(engine_, Identity, *plugin_layer->getOutput(0));
-    identity_layer->setOutputType(0, nvinfer1::DataType::kINT8);
-    engine_->SetTensorDynamicRange(identity_layer->getOutput(0), out_scale);
-    engine_->SetITensor(output_name, identity_layer->getOutput(0));
-    // engine_->DeclareOutput(output_name);
+    // auto* identity_layer =
+    //     TRT_ENGINE_ADD_LAYER(engine_, Identity, *plugin_layer->getOutput(0));
+    // identity_layer->setOutputType(0, nvinfer1::DataType::kINT8);
+    // engine_->SetTensorDynamicRange(identity_layer->getOutput(0), out_scale);
+    // engine_->SetITensor(output_name, identity_layer->getOutput(0));
+    RreplenishLayerAndOutput(
+        plugin_layer, "int4_gemm", {output_name}, test_mode);
+
+    // auto* iden_out_layer =
+    //     TRT_ENGINE_ADD_LAYER(engine_, Identity,
+    //     *identity_layer->getOutput(0));
+    // engine_->SetITensor(output_name + ".debug",
+    // iden_out_layer->getOutput(0)); engine_->DeclareOutput(output_name +
+    // ".debug");
 
     free(plugin_ptr);
   }
@@ -436,8 +449,8 @@ class FcOpConverter : public OpConverter {
         int4_plug(op,
                   scope,
                   test_mode,
-                  weight,
-                  bias,
+                  &weight,
+                  &bias,
                   m,
                   n,
                   inputs,
@@ -494,7 +507,6 @@ class FcOpConverter : public OpConverter {
                                    {output_name},
                                    test_mode);
         }
-        // engine_->DeclareOutput(output_name);
       } else {
         // add fc layer
         auto* fc_layer_float = TRT_ENGINE_ADD_LAYER(engine_,
@@ -528,6 +540,12 @@ class FcOpConverter : public OpConverter {
                                    test_mode);
         }
       }
+      auto out_dim = engine_->GetITensor(output_name)->getDimensions();
+      std::cout << "after reshape fc shape:" << out_dim.nbDims;
+      for (int i = 0; i < out_dim.nbDims; i++) {
+        std::cout << " " << out_dim.d[i] << " ";
+      }
+      std::cout << std::endl;
     };
 
     bool transpose_y = false;
