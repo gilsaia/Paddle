@@ -155,16 +155,16 @@ MatmulInt4Plugin::MatmulInt4Plugin(nvinfer1::Dims const& dims_x,
     }
   }
 
-  int32_t* debug = reinterpret_cast<int32_t*>(malloc(k_ * n_ * 4));
-  std::cout << "in construct weight print" << std::endl;
-  cudaMemcpy(debug, y_extra_, k_ * n_ * 4, cudaMemcpyDeviceToHost);
-  for (int i = 0; i < 20; ++i) {
-    for (int j = 0; j < n_; ++j) {
-      std::cout << debug[i * n_ + j] << " ";
-    }
-    std::cout << std::endl;
-  }
-  free(debug);
+  // int32_t* debug = reinterpret_cast<int32_t*>(malloc(k_ * n_ * 4));
+  // std::cout << "in construct weight print" << std::endl;
+  // cudaMemcpy(debug, y_extra_, k_ * n_ * 4, cudaMemcpyDeviceToHost);
+  // for (int i = 0; i < 20; ++i) {
+  //   for (int j = 0; j < n_; ++j) {
+  //     std::cout << debug[i * n_ + j] << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  // free(debug);
 }
 
 MatmulInt4Plugin::MatmulInt4Plugin(void const* data, size_t length) {
@@ -468,12 +468,12 @@ int32_t MatmulInt4Plugin::enqueue(nvinfer1::PluginTensorDesc const* input_desc,
 
   auto dims_x = input_desc[0].dims;
   m_ = dims_x.d[dims_x.nbDims - 2];
-  float scale_alpha = scale_x_ * scale_y_;
-  float scale_beta = scale_bias_;
+  float scale_alpha = scale_x_ * scale_y_ / scale_out_;
+  float scale_beta = scale_bias_ / scale_out_;
 
   const int8_t* x = static_cast<const int8_t*>(inputs[0]);
   phi::fusion::cutlass_gemm_internal::ConvertDataToInt4<int8_t>(
-      x, x_convert_, m_ * k_);
+      x, x_convert_, m_ * k_, dev_ctx.stream());
   // phi::fusion::cutlass_gemm_internal::ConvertDataToInt4WithScale(
   //     x, x_extra_, x_convert_, m_ * k_, scale_x_);
 
@@ -505,78 +505,78 @@ int32_t MatmulInt4Plugin::enqueue(nvinfer1::PluginTensorDesc const* input_desc,
 
   auto* res = static_cast<int8_t*>(outputs[0]);
   phi::fusion::cutlass_gemm_internal::ConvertData<int32_t, int8_t>(
-      res_, res, m_ * n_);
+      res_, res, m_ * n_, dev_ctx.stream());
 
-  std::cout << "input scale " << scale_x_ << "output scale" << scale_out_
-            << "weight scale" << scale_y_ << "bias scale" << scale_bias_
-            << "alpha scale" << scale_alpha << "beta scale" << scale_beta
-            << std::endl;
-  int8_t* debug_input = reinterpret_cast<int8_t*>(malloc(m_ * k_));
-  std::cout << "input print" << std::endl;
-  cudaMemcpy(debug_input, x, m_ * k_, cudaMemcpyDeviceToHost);
-  for (int i = 0; i < 20; ++i) {
-    for (int j = 0; j < k_; ++j) {
-      std::cout << std::hex << int(debug_input[i * k_ + j]) << " ";
-    }
-    std::cout << std::endl;
-  }
-  free(debug_input);
+  // std::cout << "input scale " << scale_x_ << "output scale" << scale_out_
+  //           << "weight scale" << scale_y_ << "bias scale" << scale_bias_
+  //           << "alpha scale" << scale_alpha << "beta scale" << scale_beta
+  //           << std::endl;
+  // int8_t* debug_input = reinterpret_cast<int8_t*>(malloc(m_ * k_));
+  // std::cout << "input print" << std::endl;
+  // cudaMemcpy(debug_input, x, m_ * k_, cudaMemcpyDeviceToHost);
+  // for (int i = 0; i < 20; ++i) {
+  //   for (int j = 0; j < k_; ++j) {
+  //     std::cout << std::hex << int(debug_input[i * k_ + j]) << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  // free(debug_input);
 
-  int8_t* debug_input_convert = reinterpret_cast<int8_t*>(malloc(m_ * k_ / 2));
-  std::cout << "input convert  print" << std::endl;
-  cudaMemcpy(
-      debug_input_convert, x_convert_, m_ * k_ / 2, cudaMemcpyDeviceToHost);
-  for (int i = 0; i < 20; ++i) {
-    for (int j = 0; j < k_ / 2; ++j) {
-      std::cout << std::hex << int(debug_input_convert[i * k_ / 2 + j]) << " ";
-    }
-    std::cout << std::dec << std::endl;
-  }
-  free(debug_input_convert);
+  // int8_t* debug_input_convert = reinterpret_cast<int8_t*>(malloc(m_ * k_ /
+  // 2)); std::cout << "input convert  print" << std::endl; cudaMemcpy(
+  //     debug_input_convert, x_convert_, m_ * k_ / 2, cudaMemcpyDeviceToHost);
+  // for (int i = 0; i < 20; ++i) {
+  //   for (int j = 0; j < k_ / 2; ++j) {
+  //     std::cout << std::hex << int(debug_input_convert[i * k_ / 2 + j]) << "
+  //     ";
+  //   }
+  //   std::cout << std::dec << std::endl;
+  // }
+  // free(debug_input_convert);
 
-  int32_t* debug_weight = reinterpret_cast<int32_t*>(malloc(k_ * n_ * 4));
-  std::cout << "weight print" << std::endl;
-  cudaMemcpy(debug_weight, y_extra_, k_ * n_ * 4, cudaMemcpyDeviceToHost);
-  for (int i = 0; i < 20; ++i) {
-    for (int j = 0; j < n_; ++j) {
-      std::cout << debug_weight[i * n_ + j] << " ";
-    }
-    std::cout << std::endl;
-  }
-  free(debug_weight);
+  // int32_t* debug_weight = reinterpret_cast<int32_t*>(malloc(k_ * n_ * 4));
+  // std::cout << "weight print" << std::endl;
+  // cudaMemcpy(debug_weight, y_extra_, k_ * n_ * 4, cudaMemcpyDeviceToHost);
+  // for (int i = 0; i < 20; ++i) {
+  //   for (int j = 0; j < n_; ++j) {
+  //     std::cout << debug_weight[i * n_ + j] << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  // free(debug_weight);
 
-  int32_t* debug_bias = reinterpret_cast<int32_t*>(malloc(m_ * n_ * 4));
-  std::cout << "bias print" << std::endl;
-  cudaMemcpy(debug_bias, bias_convert_, m_ * n_ * 4, cudaMemcpyDeviceToHost);
-  for (int i = 0; i < 20; ++i) {
-    for (int j = 0; j < n_; ++j) {
-      std::cout << debug_bias[i * n_ + j] << " ";
-    }
-    std::cout << std::endl;
-  }
-  free(debug_bias);
+  // int32_t* debug_bias = reinterpret_cast<int32_t*>(malloc(m_ * n_ * 4));
+  // std::cout << "bias print" << std::endl;
+  // cudaMemcpy(debug_bias, bias_convert_, m_ * n_ * 4, cudaMemcpyDeviceToHost);
+  // for (int i = 0; i < 20; ++i) {
+  //   for (int j = 0; j < n_; ++j) {
+  //     std::cout << debug_bias[i * n_ + j] << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  // free(debug_bias);
 
-  int32_t* debug = reinterpret_cast<int32_t*>(malloc(m_ * n_ * 4));
-  std::cout << "output print" << std::endl;
-  cudaMemcpy(debug, res_, m_ * n_ * 4, cudaMemcpyDeviceToHost);
-  for (int i = 0; i < 20; ++i) {
-    for (int j = 0; j < n_; ++j) {
-      std::cout << debug[i * n_ + j] << " ";
-    }
-    std::cout << std::endl;
-  }
-  free(debug);
+  // int32_t* debug = reinterpret_cast<int32_t*>(malloc(m_ * n_ * 4));
+  // std::cout << "output print" << std::endl;
+  // cudaMemcpy(debug, res_, m_ * n_ * 4, cudaMemcpyDeviceToHost);
+  // for (int i = 0; i < 20; ++i) {
+  //   for (int j = 0; j < n_; ++j) {
+  //     std::cout << debug[i * n_ + j] << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  // free(debug);
 
-  int8_t* debug_res = reinterpret_cast<int8_t*>(malloc(m_ * n_));
-  std::cout << "output convert print" << std::endl;
-  cudaMemcpy(debug_res, res, m_ * n_, cudaMemcpyDeviceToHost);
-  for (int i = 0; i < 20; ++i) {
-    for (int j = 0; j < n_; ++j) {
-      std::cout << int(debug_res[i * n_ + j]) << " ";
-    }
-    std::cout << std::endl;
-  }
-  free(debug_res);
+  // int8_t* debug_res = reinterpret_cast<int8_t*>(malloc(m_ * n_));
+  // std::cout << "output convert print" << std::endl;
+  // cudaMemcpy(debug_res, res, m_ * n_, cudaMemcpyDeviceToHost);
+  // for (int i = 0; i < 20; ++i) {
+  //   for (int j = 0; j < n_; ++j) {
+  //     std::cout << int(debug_res[i * n_ + j]) << " ";
+  //   }
+  //   std::cout << std::endl;
+  // }
+  // free(debug_res);
 
   // auto* res = static_cast<__half*>(outputs[0]);
   // phi::fusion::cutlass_gemm_internal::ConvertData<int32_t, __half>(
@@ -705,21 +705,21 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
                 << std::endl;
       if (y_type == nvinfer1::DataType::kHALF) {
         scale_y = convertWeightFindScale(
-            reinterpret_cast<half*>(y_ori), fc->fields[i].length, 127);
+            reinterpret_cast<half*>(y_ori), fc->fields[i].length, 15);
       } else if (y_type == nvinfer1::DataType::kFLOAT) {
         scale_y = convertWeightFindScale(
-            reinterpret_cast<float*>(y_ori), fc->fields[i].length, 127);
+            reinterpret_cast<float*>(y_ori), fc->fields[i].length, 15);
       }
-      float* debug = reinterpret_cast<float*>(y_ori);
-      std::cout << "create plugin weight print" << std::endl;
-      // cudaMemcpy(debug, res, m_ * n_ * 4, cudaMemcpyDeviceToHost);
-      for (int i = 0; i < 20; ++i) {
-        for (int j = 0; j < n; ++j) {
-          std::cout << debug[i * n + j] << " ";
-        }
-        std::cout << std::endl;
-      }
-      // free(debug);
+      // float* debug = reinterpret_cast<float*>(y_ori);
+      // std::cout << "create plugin weight print" << std::endl;
+      // // cudaMemcpy(debug, res, m_ * n_ * 4, cudaMemcpyDeviceToHost);
+      // for (int i = 0; i < 20; ++i) {
+      //   for (int j = 0; j < n; ++j) {
+      //     std::cout << debug[i * n + j] << " ";
+      //   }
+      //   std::cout << std::endl;
+      // }
+      // // free(debug);
 
       cudaMalloc(&y, k * n * sizeof(y_type));
       cudaMemcpy(y, y_ori, k * n * sizeof(y_type), cudaMemcpyHostToDevice);
@@ -727,17 +727,17 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
       void* bias_ori = const_cast<void*>(fc->fields[i].data);
       if (bias_type == nvinfer1::DataType::kFLOAT) {
         scale_bias = convertWeightFindScale(
-            reinterpret_cast<float*>(bias_ori), fc->fields[i].length, 127);
+            reinterpret_cast<float*>(bias_ori), fc->fields[i].length, 15);
       } else if (bias_type == nvinfer1::DataType::kHALF) {
         scale_bias = convertWeightFindScale(
-            reinterpret_cast<half*>(bias_ori), fc->fields[i].length, 127);
+            reinterpret_cast<half*>(bias_ori), fc->fields[i].length, 15);
       }
-      std::cout << "create plugin bias print" << std::endl;
-      // cudaMemcpy(debug, res, m_ * n_ * 4, cudaMemcpyDeviceToHost);
-      for (int j = 0; j < fc->fields[i].length; ++j) {
-        std::cout << reinterpret_cast<float*>(bias_ori)[j] << " ";
-      }
-      std::cout << std::endl;
+      // std::cout << "create plugin bias print" << std::endl;
+      // // cudaMemcpy(debug, res, m_ * n_ * 4, cudaMemcpyDeviceToHost);
+      // for (int j = 0; j < fc->fields[i].length; ++j) {
+      //   std::cout << reinterpret_cast<float*>(bias_ori)[j] << " ";
+      // }
+      // std::cout << std::endl;
       void* bias_device_ori;
       cudaMalloc(&bias_device_ori, fc->fields[i].length * sizeof(bias_type));
       cudaMemcpy(bias_device_ori,

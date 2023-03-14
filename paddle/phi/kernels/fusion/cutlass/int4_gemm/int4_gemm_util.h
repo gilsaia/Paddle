@@ -68,18 +68,14 @@ void ConvertDataToInt4(const Context &ctx,
 template <typename T>
 void ConvertDataToInt4(const T *source,
                        cutlass::int4b_t *output,
-                       const size_t source_size);
-
-void ConvertDataToInt4WithScale(const int32_t *source,
-                                int32_t *extra,
-                                cutlass::int4b_t *output,
-                                const size_t source_size,
-                                float scale);
+                       const size_t source_size,
+                       cudaStream_t stream = 0);
 
 template <typename Source, typename Target>
 void ConvertData(const Source *source,
                  Target *output,
-                 const size_t source_size);
+                 const size_t source_size,
+                 cudaStream_t stream = 0);
 }  // namespace cutlass_gemm_internal
 }  // namespace fusion
 }  // namespace phi

@@ -243,7 +243,37 @@ class FcOpConverter : public OpConverter {
         plugin_inputs.data(), plugin_inputs.size(), *plugin_obj);
 
     std::cout << "end create plugin" << std::endl;
+    engine_->SetTensorDynamicRange(plugin_layer->getOutput(0), out_scale);
+    RreplenishLayerAndOutput(
+        plugin_layer, "int4_gemm", {output_name}, test_mode);
 
+    // if (with_bias) {
+    //   nvinfer1::Dims bias_dim;
+    //   bias_dim.nbDims = dims_x.nbDims;
+    //   std::cout << "bias dims:" << bias_dim.nbDims << std::endl;
+    //   for (int i = 0; i < (bias_dim.nbDims - 1); ++i) {
+    //     bias_dim.d[i] = 1;
+    //   }
+    //   bias_dim.d[bias_dim.nbDims - 1] = bias->get().count;
+    //   // bias_dim.d[bias_dim.nbDims - 1] = bias->dims.;
+    //   std::cout << "init bias dims" << std::endl;
+    //   auto* bias_tensor =
+    //       TRT_ENGINE_ADD_LAYER(engine_, Constant, bias_dim, bias->get());
+    //   engine_->SetTensorDynamicRange(bias_tensor->getOutput(0), out_scale);
+    //   auto* add_layer =
+    //       TRT_ENGINE_ADD_LAYER(engine_,
+    //                            ElementWise,
+    //                            *plugin_layer->getOutput(0),
+    //                            *bias_tensor->getOutput(0),
+    //                            nvinfer1::ElementWiseOperation::kSUM);
+    //   add_layer->setOutputType(0, nvinfer1::DataType::kINT8);
+    //   add_layer->setPrecision(nvinfer1::DataType::kINT8);
+    //   RreplenishLayerAndOutput(
+    //       add_layer, "after_int4_gemm_bias", {output_name}, test_mode);
+    // } else {
+    //   RreplenishLayerAndOutput(
+    //       plugin_layer, "int4_gemm", {output_name}, test_mode);
+    // }
     // plugin_layer->setName(
     //     ("matmul_int4: (Output: " + output_name + "_int32" + ")").c_str());
     // engine_->SetITensor(output_name + "_int32", plugin_layer->getOutput(0));
@@ -253,8 +283,6 @@ class FcOpConverter : public OpConverter {
     // identity_layer->setOutputType(0, nvinfer1::DataType::kINT8);
     // engine_->SetTensorDynamicRange(identity_layer->getOutput(0), out_scale);
     // engine_->SetITensor(output_name, identity_layer->getOutput(0));
-    RreplenishLayerAndOutput(
-        plugin_layer, "int4_gemm", {output_name}, test_mode);
 
     // auto* iden_out_layer =
     //     TRT_ENGINE_ADD_LAYER(engine_, Identity,
@@ -433,8 +461,9 @@ class FcOpConverter : public OpConverter {
       std::cout << "in lambda" << std::endl;
       auto& dims_y = weight.dims;
       std::cout << "y dims " << dims_y[0] << " " << dims_y[1] << std::endl;
-      bool aligned = !(dims_y.front() % 8);
-      if (aligned && (support_int8 || enable_int8)) {
+      // bool aligned = !(dims_y.front() % 8);
+      bool need_int4 = (dims_y[0] == 3072 || dims_y[1] == 3072);
+      if (need_int4 && (support_int8 || enable_int8)) {
         float out_scale = 0;
         if (enable_int8) {
           PADDLE_ENFORCE_EQ(

@@ -224,7 +224,8 @@ template void ConvertDataToInt4<int32_t, phi::GPUContext>(
 template <typename T>
 void ConvertDataToInt4(const T *source,
                        cutlass::int4b_t *output,
-                       const size_t source_size) {
+                       const size_t source_size,
+                       cudaStream_t stream) {
   constexpr int block_ = 512;
   dim3 grid((source_size + block_ - 1) / block_);
   dim3 block(block_);
@@ -235,7 +236,8 @@ void ConvertDataToInt4(const T *source,
 
 template void ConvertDataToInt4<int32_t>(const int32_t *source,
                                          cutlass::int4b_t *output,
-                                         const size_t source_size);
+                                         const size_t source_size,
+                                         cudaStream_t stream);
 
 static inline __device__ uint32_t char8_to_int4b8(int8_t a,
                                                   int8_t b,
@@ -309,25 +311,26 @@ __global__ void convertInt8ToInt4(const int8_t *source,
 template <>
 void ConvertDataToInt4<int8_t>(const int8_t *source,
                                cutlass::int4b_t *output,
-                               const size_t source_size) {
-  constexpr int block_ = 8;
-  dim3 grid(1024 / block_);
-  dim3 block(block_);
-  convertInt8ToInt4<<<grid, block>>>(source, output, source_size);
-}
-
-void ConvertDataToInt4WithScale(const int32_t *source,
-                                int32_t *extra,
-                                cutlass::int4b_t *output,
-                                const size_t source_size,
-                                float scale) {
-  constexpr int block_ = 512;
+                               const size_t source_size,
+                               cudaStream_t stream) {
+  constexpr int block_ = 256;
   dim3 grid((source_size + block_ - 1) / block_);
   dim3 block(block_);
-  DynamicConvertWithScale<<<grid, block>>>(
-      source, extra, output, source_size, scale);
-  return;
+  convertInt8ToInt4<<<grid, block, 0, stream>>>(source, output, source_size);
 }
+
+// void ConvertDataToInt4WithScale(const int32_t *source,
+//                                 int32_t *extra,
+//                                 cutlass::int4b_t *output,
+//                                 const size_t source_size,
+//                                 float scale) {
+//   constexpr int block_ = 512;
+//   dim3 grid((source_size + block_ - 1) / block_);
+//   dim3 block(block_);
+//   DynamicConvertWithScale<<<grid, block>>>(
+//       source, extra, output, source_size, scale);
+//   return;
+// }
 
 static inline __device__ uint32_t int4_to_char4(int32_t a,
                                                 int32_t b,
@@ -371,7 +374,8 @@ __global__ void convertInt32ToInt8(const int32_t *source,
 template <typename Source, typename Target>
 void ConvertData(const Source *source,
                  Target *output,
-                 const size_t source_size) {
+                 const size_t source_size,
+                 cudaStream_t stream) {
   constexpr int block_ = 512;
   dim3 grid((source_size + block_ - 1) / block_);
   dim3 block(block_);
@@ -382,25 +386,30 @@ void ConvertData(const Source *source,
 template <>
 void ConvertData<int32_t, int8_t>(const int32_t *source,
                                   int8_t *output,
-                                  const size_t source_size) {
-  constexpr int block_ = 8;
-  dim3 grid(1024 / block_);
+                                  const size_t source_size,
+                                  cudaStream_t stream) {
+  constexpr int block_ = 256;
+  dim3 grid((source_size + block_ - 1) / block_);
   dim3 block(block_);
-  convertInt32ToInt8<<<grid, block>>>(source, output, source_size);
+  convertInt32ToInt8<<<grid, block, 0, stream>>>(source, output, source_size);
 }
 
 template void ConvertData<int8_t, int>(const int8_t *source,
                                        int *output,
-                                       const size_t source_size);
+                                       const size_t source_size,
+                                       cudaStream_t stream);
 template void ConvertData<cutlass::half_t, int>(const cutlass::half_t *source,
                                                 int *output,
-                                                const size_t source_size);
+                                                const size_t source_size,
+                                                cudaStream_t stream);
 template void ConvertData<float, int>(const float *source,
                                       int *output,
-                                      const size_t source_size);
+                                      const size_t source_size,
+                                      cudaStream_t stream);
 template void ConvertData<int, int>(const int *source,
                                     int *output,
-                                    const size_t source_size);
+                                    const size_t source_size,
+                                    cudaStream_t stream);
 
 }  // namespace cutlass_gemm_internal
 }  // namespace fusion
