@@ -114,11 +114,12 @@ class MatmulInt4Plugin : public nvinfer1::IPluginV2DynamicExt {
   nvinfer1::DataType type_x_, type_y_, type_bias_;
   Int4GemmActivationType activation_type_;
   int batch_;
+  int64_t max_m_;
   uint64_t m_;
   uint64_t n_;
   uint64_t k_;
   float scale_x_, scale_y_, scale_bias_, scale_out_;
-  int32_t *res_, *y_extra_, *bias_convert_, *x_extra_;
+  int32_t *res_, *y_extra_, *bias_extra_, *bias_convert_, *x_extra_;
   cutlass::int4b_t *x_convert_, *y_convert_;
   //   void *y_ori_, *y_device_, *bias_ori_, *bias_device_;
   void *y_device_, *bias_device_;

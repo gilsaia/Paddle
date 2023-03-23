@@ -631,6 +631,23 @@ class FcOpConverter : public OpConverter {
       bias = engine_->GetTrtWeight(op_desc.Input("Bias").front(), *b_t);
     }
 
+    // auto& bias_t = bias.get();
+    // float* b_data =
+    //     const_cast<float*>(reinterpret_cast<const float*>(bias_t.values));
+    // for (int i = 0; i < bias_t.count; ++i) {
+    //   b_data[i] = 0;
+    // }
+
+    // const float* weight_data =
+    //     reinterpret_cast<const float*>(weight.get().values);
+    // std::cout << "in converter print weight" << std::endl;
+    // for (int i = 0; i < 20; ++i) {
+    //   for (int j = 0; j < 50; ++j) {
+    //     std::cout << weight_data[j + i * 3072] << " ";
+    //   }
+    //   std::cout << std::endl;
+    // }
+
     // Running the TRT Static Shape mode: x_num_col_dims-1
     if (!engine_->with_dynamic_shape()) {
       x_num_col_dims--;
@@ -638,7 +655,34 @@ class FcOpConverter : public OpConverter {
     // If use tensorrt'oss, the x_dim and x_num_col_dims need change, and can
     // not add Shuffle layer in ernie's multihead.
     if (x_dim.nbDims == 4 && x_dim.d[2] == 1 && x_dim.d[3] == 1) {
-      if (enable_int8 || support_int8) {
+      auto& dims_y = weight.dims;
+      bool need_int4 = (dims_y[0] == 3072 || dims_y[1] == 3072);
+      if (need_int4 && (support_int8 || enable_int8)) {
+        float out_scale = 0;
+        if (enable_int8) {
+          PADDLE_ENFORCE_EQ(
+              op_desc.HasAttr("out_threshold"),
+              true,
+              platform::errors::InvalidArgument(
+                  "must have out threshold in fc layers in int8 mode"));
+          out_scale = PADDLE_GET_CONST(float, op_desc.GetAttr("out_threshold"));
+        } else {
+          out_scale = PADDLE_GET_CONST(float, op_desc.GetAttr("Out"));
+        }
+        int4_plug(op,
+                  scope,
+                  test_mode,
+                  &weight,
+                  &bias,
+                  m,
+                  n,
+                  X,
+                  i_name,
+                  activation_type,
+                  in_scale,
+                  out_scale);
+      } else if (enable_int8 || support_int8) {
+        // if (enable_int8 || support_int8) {
         // add conv1x1 layer
         nvinfer1::DimsHW nv_ksize(1, 1);
         auto* fc_layer_int8 = TRT_ENGINE_ADD_LAYER(engine_,

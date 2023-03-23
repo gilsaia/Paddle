@@ -31,7 +31,7 @@ template <typename TShape,
           int NumStages>
 cutlass::Status Int4GemmBiasReluImpl(GemmAllParams params) {
   using ElementAccumulator = int32_t;
-  using ElementComputeEpilogue = int;
+  using ElementComputeEpilogue = float;
   using ElementOutput = int32_t;
   using ElementInputA = cutlass::int4b_t;
   using ElementInputB = cutlass::int4b_t;
