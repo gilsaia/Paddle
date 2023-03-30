@@ -51,7 +51,8 @@ cutlass::Status Int4GemmReluImpl(GemmAllParams params) {
       128 / cutlass::sizeof_bits<ElementOutput>::value,
       ElementAccumulator,
       ElementComputeEpilogue,
-      cutlass::epilogue::thread::ScaleType::OnlyAlphaScaling>;
+      cutlass::epilogue::thread::ScaleType::OnlyAlphaScaling,
+      cutlass::FloatRoundStyle::round_to_nearest>;
   using Gemm = cutlass::gemm::device::Gemm<ElementInputA,
                                            LayoutInputA,
                                            ElementInputB,

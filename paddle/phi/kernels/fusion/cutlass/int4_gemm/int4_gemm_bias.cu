@@ -50,7 +50,9 @@ cutlass::Status Int4GemmBiasImpl(GemmAllParams params) {
       ElementOutput,
       128 / cutlass::sizeof_bits<ElementOutput>::value,
       ElementAccumulator,
-      ElementComputeEpilogue>;
+      ElementComputeEpilogue,
+      cutlass::epilogue::thread::ScaleType::Default,
+      cutlass::FloatRoundStyle::round_to_nearest>;
   using Gemm = cutlass::gemm::device::Gemm<ElementInputA,
                                            LayoutInputA,
                                            ElementInputB,

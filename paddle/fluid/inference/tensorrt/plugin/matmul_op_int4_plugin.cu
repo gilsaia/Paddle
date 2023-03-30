@@ -82,6 +82,7 @@ MatmulInt4Plugin::MatmulInt4Plugin(nvinfer1::Dims const& dims_x,
                                    nvinfer1::DataType type_y,
                                    float scale_y,
                                    Int4GemmActivationType activation_type,
+                                   bool output_int4_range,
                                    bool with_bias,
                                    nvinfer1::DataType type_bias,
                                    float scale_bias,
@@ -95,6 +96,7 @@ MatmulInt4Plugin::MatmulInt4Plugin(nvinfer1::Dims const& dims_x,
       type_y_(type_y),
       scale_y_(scale_y),
       activation_type_(activation_type),
+      output_int4_range_(output_int4_range),
       with_bias_(with_bias),
       type_bias_(type_bias),
       scale_bias_(scale_bias),
@@ -174,6 +176,7 @@ MatmulInt4Plugin::MatmulInt4Plugin(void const* data, size_t length) {
   DeserializeValue(&data, &length, &scale_x_);
   DeserializeValue(&data, &length, &scale_y_);
   DeserializeValue(&data, &length, &activation_type_);
+  DeserializeValue(&data, &length, &output_int4_range_);
   DeserializeValue(&data, &length, &with_bias_);
   DeserializeValue(&data, &length, &type_bias_);
   DeserializeValue(&data, &length, &scale_bias_);
@@ -396,6 +399,7 @@ nvinfer1::IPluginV2DynamicExt* MatmulInt4Plugin::clone() const noexcept {
                                 type_y_,
                                 scale_y_,
                                 activation_type_,
+                                output_int4_range_,
                                 with_bias_,
                                 type_bias_,
                                 scale_bias_,
@@ -503,11 +507,12 @@ size_t MatmulInt4Plugin::getSerializationSize() const noexcept {
   return SerializedSize(dims_x_) + SerializedSize(dims_y_) +
          SerializedSize(type_x_) + SerializedSize(type_y_) +
          SerializedSize(type_bias_) + SerializedSize(activation_type_) +
-         SerializedSize(with_bias_) + SerializedSize(batch_) +
-         SerializedSize(m_) + SerializedSize(n_) + SerializedSize(k_) +
-         SerializedSize(scale_x_) + SerializedSize(scale_y_) +
-         SerializedSize(scale_bias_) + SerializedSize(scale_out_) +
-         n_ * k_ * sizeof(type_y_) + (with_bias_ ? n_ * sizeof(type_bias_) : 0);
+         SerializedSize(output_int4_range_) + SerializedSize(with_bias_) +
+         SerializedSize(batch_) + SerializedSize(m_) + SerializedSize(n_) +
+         SerializedSize(k_) + SerializedSize(scale_x_) +
+         SerializedSize(scale_y_) + SerializedSize(scale_bias_) +
+         SerializedSize(scale_out_) + n_ * k_ * sizeof(type_y_) +
+         (with_bias_ ? n_ * sizeof(type_bias_) : 0);
 }
 
 void MatmulInt4Plugin::serialize(void* buffer) const noexcept {
@@ -525,6 +530,7 @@ void MatmulInt4Plugin::serialize(void* buffer) const noexcept {
   SerializeValue(&buffer, scale_x_);
   SerializeValue(&buffer, scale_y_);
   SerializeValue(&buffer, activation_type_);
+  SerializeValue(&buffer, output_int4_range_);
   SerializeValue(&buffer, with_bias_);
   SerializeValue(&buffer, type_bias_);
   SerializeValue(&buffer, scale_bias_);
@@ -578,8 +584,29 @@ int32_t MatmulInt4Plugin::enqueue(nvinfer1::PluginTensorDesc const* input_desc,
   } else if (dims_x.nbDims == 3) {
     m_ = dims_x.d[1];
   }
-  float scale_alpha = scale_x_ * scale_y_ / scale_out_;
-  float scale_beta = scale_bias_ / scale_out_;
+
+  float scale_alpha = 1;
+  if (output_int4_range_) {
+    // scale_alpha=(scale_x_/127)*(scale_y_/7)/(scale_out_/7);
+    scale_alpha = scale_x_ * scale_y_ / scale_out_ / 127;
+  } else {
+    // float scale_alpha = (scale_x_/127) * (scale_y_/7) / (scale_out_/127);
+    scale_alpha = scale_x_ * scale_y_ / scale_out_ / 7;
+  }
+  // scale_alpha = 1;
+
+  float scale_beta = 0;
+  if (output_int4_range_) {
+    // float scale_beta = (scale_bias_ / 127) / (scale_out_ / 7);
+    scale_beta = scale_bias_ * 7 / scale_out_ / 127;
+  } else {
+    // float scale_beta = (scale_bias_ / 127) / (scale_out_ / 127);
+    scale_beta = scale_bias_ / scale_out_;
+  }
+  // if (n_ == 768) {
+  //   scale_beta = 0;
+  // }
+  // scale_beta = 0;
 
   // void* y_tmp;
   // cudaMalloc(&y_tmp, k_ * n_);
@@ -657,7 +684,7 @@ int32_t MatmulInt4Plugin::enqueue(nvinfer1::PluginTensorDesc const* input_desc,
   // cudaMemcpy(debug_input, x, m_ * k_, cudaMemcpyDeviceToHost);
   // for (int i = 0; i < 20; ++i) {
   //   for (int j = 0; j < k_; ++j) {
-  //     std::cout << std::hex << int(debug_input[i * k_ + j]) << " ";
+  //     std::cout << int(debug_input[i * k_ + j]) << " ";
   //   }
   //   std::cout << std::endl;
   // }
@@ -770,51 +797,54 @@ char const* MatmulInt4PluginCreator::getPluginNamespace() const noexcept {
 }
 
 float convertWeightFindScale(float* weight, size_t size, int range_size) {
-  float w_min = weight[0], w_max = weight[0];
+  float w_min = std::abs(weight[0]), w_max = std::abs(weight[0]);
   for (size_t i = 1; i < size; ++i) {
     // w_min = std::min(w_min, weight[i]);
-    w_max = std::max(w_max, weight[i]);
+    w_max = std::max(w_max, std::abs(weight[i]));
   }
   float scale = w_max / range_size;
   for (size_t i = 0; i < size; ++i) {
     weight[i] /= scale;
   }
-  return scale;
+  return w_max;
 }
 
 float convertWeightFindScale(half* weight, size_t size, int range_size) {
-  float w_min = weight[0], w_max = weight[0];
+  float w_min = std::abs(__half2float(weight[0])),
+        w_max = std::abs(__half2float(weight[0]));
   for (size_t i = 1; i < size; ++i) {
     // w_min = std::min(w_min, __half2float(weight[i]));
-    w_max = std::max(w_max, __half2float(weight[i]));
+    w_max = std::max(w_max, std::abs(__half2float(weight[i])));
   }
   float scale = w_max / range_size;
   for (size_t i = 0; i < size; ++i) {
     weight[i] = __float2half(__half2float(weight[i]) / scale);
   }
-  return scale;
+  return w_max;
 }
 
-float convertWeightPerChannel(
-    float* weight, int m, int n, int column_major, int range_size) {
-  float* scales = new float[n];
-  for (int i = 0; i < n; ++i) {
-    int idx = column_major ? i * m : i;
-    scales[i] = std::abs(weight[idx]);
-  }
-  for (int i = 0; i < m * n; ++i) {
-    int idx = column_major ? i / m : i % n;
-    scales[idx] = std::max(scales[idx], std::abs(weight[i]));
-  }
-  for (int i = 0; i < n; ++i) {
-    scales[i] /= range_size;
-  }
-  for (int i = 0; i < m * n; ++i) {
-    int idx = column_major ? i / m : i % n;
-    weight[i] /= scales[idx];
-  }
-  return scales[0];
-}
+// float convertWeightPerChannel(
+//     float* weight, int m, int n, int column_major, int range_size) {
+//   float* scales = new float[n];
+//   for (int i = 0; i < n; ++i) {
+//     int idx = column_major ? i * m : i;
+//     scales[i] = std::abs(weight[idx]);
+//   }
+//   for (int i = 0; i < m * n; ++i) {
+//     int idx = column_major ? i / m : i % n;
+//     scales[idx] = std::max(scales[idx], std::abs(weight[i]));
+//   }
+//   for (int i = 0; i < n; ++i) {
+//     scales[i] /= range_size;
+//   }
+//   for (int i = 0; i < m * n; ++i) {
+//     int idx = column_major ? i / m : i % n;
+//     weight[i] /= scales[idx];
+//   }
+//   float res = scales[0];
+//   delete scales;
+//   return res;
+// }
 
 nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
     char const* name, const nvinfer1::PluginFieldCollection* fc) noexcept {
@@ -829,7 +859,7 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
   nvinfer1::DataType x_type, y_type, bias_type;
   float scale_x, scale_y, scale_bias, scale_out;
   Int4GemmActivationType activation_type;
-  bool with_bias = false;
+  bool with_bias = false, output_int4_range = false;
   void *y, *bias = nullptr;
   int m, n, k;
   for (int i = 0; i < fc->nbFields; ++i) {
@@ -852,11 +882,16 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
           reinterpret_cast<const nvinfer1::DataType*>(fc->fields[i].data)[0];
     } else if (field_name.compare("scale_x") == 0) {
       scale_x = reinterpret_cast<const float*>(fc->fields[i].data)[0];
+      // scale_x = scale_x / 7;
     } else if (field_name.compare("scale_out") == 0) {
       scale_out = reinterpret_cast<const float*>(fc->fields[i].data)[0];
+      // scale_out = scale_out / 7;
     } else if (field_name.compare("activation_type") == 0) {
       activation_type = reinterpret_cast<const Int4GemmActivationType*>(
           fc->fields[i].data)[0];
+    } else if (field_name.compare("output_int4_range") == 0) {
+      output_int4_range =
+          (reinterpret_cast<const int32_t*>(fc->fields[i].data)[0] != 0);
     } else if (field_name.compare("with_bias") == 0) {
       with_bias =
           (reinterpret_cast<const int32_t*>(fc->fields[i].data)[0] != 0);
@@ -877,10 +912,10 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
       // free(debug);
       if (y_type == nvinfer1::DataType::kHALF) {
         scale_y = convertWeightFindScale(
-            reinterpret_cast<half*>(y_ori), fc->fields[i].length, 127);
+            reinterpret_cast<half*>(y_ori), fc->fields[i].length, 7);
       } else if (y_type == nvinfer1::DataType::kFLOAT) {
         scale_y = convertWeightFindScale(
-            reinterpret_cast<float*>(y_ori), fc->fields[i].length, 127);
+            reinterpret_cast<float*>(y_ori), fc->fields[i].length, 7);
       }
       debug = reinterpret_cast<float*>(y_ori);
       std::cout << "create plugin after covert weight print" << std::endl;
@@ -957,6 +992,7 @@ nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
                                              y_type,
                                              scale_y,
                                              activation_type,
+                                             output_int4_range,
                                              with_bias,
                                              bias_type,
                                              scale_bias,

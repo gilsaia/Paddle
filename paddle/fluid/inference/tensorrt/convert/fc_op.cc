@@ -186,6 +186,7 @@ class FcOpConverter : public OpConverter {
             Int4GemmActivationType::INT4_GEMM_ACTIVATION_TYPE_NONE;
       }
     }
+    bool output_int4_range = (dims_y.d[1] == 3072);
 
     std::vector<nvinfer1::PluginField> fields;
     fields.emplace_back("dims_x", &dims_x, nvinfer1::PluginFieldType::kDIMS, 1);
@@ -204,6 +205,10 @@ class FcOpConverter : public OpConverter {
         "scale_x", &in_scale, nvinfer1::PluginFieldType::kFLOAT32, 1);
     fields.emplace_back(
         "scale_out", &out_scale, nvinfer1::PluginFieldType::kFLOAT32, 1);
+    fields.emplace_back("output_int4_range",
+                        &output_int4_range,
+                        nvinfer1::PluginFieldType::kINT32,
+                        1);
     if (with_bias) {
       fields.emplace_back(
           "with_bias", &with_bias, nvinfer1::PluginFieldType::kINT32, 1);
@@ -243,7 +248,13 @@ class FcOpConverter : public OpConverter {
         plugin_inputs.data(), plugin_inputs.size(), *plugin_obj);
 
     std::cout << "end create plugin" << std::endl;
-    engine_->SetTensorDynamicRange(plugin_layer->getOutput(0), out_scale);
+    // engine_->SetTensorDynamicRange(plugin_layer->getOutput(0), out_scale);
+    if (output_int4_range) {
+      engine_->SetTensorDynamicRange(plugin_layer->getOutput(0),
+                                     out_scale / 7 * 127);
+    } else {
+      engine_->SetTensorDynamicRange(plugin_layer->getOutput(0), out_scale);
+    }
     RreplenishLayerAndOutput(
         plugin_layer, "int4_gemm", {output_name}, test_mode);
 
@@ -475,6 +486,7 @@ class FcOpConverter : public OpConverter {
         } else {
           out_scale = PADDLE_GET_CONST(float, op_desc.GetAttr("Out"));
         }
+        engine_->SetTensorDynamicRange(X, in_scale / 7 * 127);
         int4_plug(op,
                   scope,
                   test_mode,
@@ -669,6 +681,7 @@ class FcOpConverter : public OpConverter {
         } else {
           out_scale = PADDLE_GET_CONST(float, op_desc.GetAttr("Out"));
         }
+        engine_->SetTensorDynamicRange(X, in_scale / 7 * 127);
         int4_plug(op,
                   scope,
                   test_mode,

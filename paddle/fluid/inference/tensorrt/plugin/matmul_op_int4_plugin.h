@@ -53,6 +53,7 @@ class MatmulInt4Plugin : public nvinfer1::IPluginV2DynamicExt {
                    nvinfer1::DataType type_y,
                    float scale_y,
                    Int4GemmActivationType activation_type,
+                   bool output_int4_range,
                    bool with_bias,
                    nvinfer1::DataType type_bias,
                    float scale_bias,
@@ -123,7 +124,7 @@ class MatmulInt4Plugin : public nvinfer1::IPluginV2DynamicExt {
   cutlass::int4b_t *x_convert_, *y_convert_;
   //   void *y_ori_, *y_device_, *bias_ori_, *bias_device_;
   void *y_device_, *bias_device_;
-  bool with_bias_;
+  bool with_bias_, output_int4_range_;
   std::string namespace_;
 };
 
