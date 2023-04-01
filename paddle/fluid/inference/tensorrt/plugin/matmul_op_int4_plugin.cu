@@ -823,28 +823,28 @@ float convertWeightFindScale(half* weight, size_t size, int range_size) {
   return w_max;
 }
 
-// float convertWeightPerChannel(
-//     float* weight, int m, int n, int column_major, int range_size) {
-//   float* scales = new float[n];
-//   for (int i = 0; i < n; ++i) {
-//     int idx = column_major ? i * m : i;
-//     scales[i] = std::abs(weight[idx]);
-//   }
-//   for (int i = 0; i < m * n; ++i) {
-//     int idx = column_major ? i / m : i % n;
-//     scales[idx] = std::max(scales[idx], std::abs(weight[i]));
-//   }
-//   for (int i = 0; i < n; ++i) {
-//     scales[i] /= range_size;
-//   }
-//   for (int i = 0; i < m * n; ++i) {
-//     int idx = column_major ? i / m : i % n;
-//     weight[i] /= scales[idx];
-//   }
-//   float res = scales[0];
-//   delete scales;
-//   return res;
-// }
+float convertWeightPerChannel(
+    float* weight, int m, int n, int column_major, int range_size) {
+  float* scales = new float[n];
+  for (int i = 0; i < n; ++i) {
+    int idx = column_major ? i * m : i;
+    scales[i] = std::abs(weight[idx]);
+  }
+  for (int i = 0; i < m * n; ++i) {
+    int idx = column_major ? i / m : i % n;
+    scales[idx] = std::max(scales[idx], std::abs(weight[i]));
+  }
+  for (int i = 0; i < n; ++i) {
+    scales[i] /= range_size;
+  }
+  for (int i = 0; i < m * n; ++i) {
+    int idx = column_major ? i / m : i % n;
+    weight[i] /= scales[idx];
+  }
+  float res = scales[0];
+  delete scales;
+  return res;
+}
 
 nvinfer1::IPluginV2* MatmulInt4PluginCreator::createPlugin(
     char const* name, const nvinfer1::PluginFieldCollection* fc) noexcept {
