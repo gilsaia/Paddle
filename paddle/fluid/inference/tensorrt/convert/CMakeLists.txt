@@ -117,6 +117,10 @@ if(${TENSORRT_MAJOR_VERSION} GREATER_EQUAL 8 AND ${TENSORRT_MINOR_VERSION}
   list(APPEND CONVERT_FILES set_value_op.cc)
 endif()
 
+if(WITH_CUTLASS)
+  list(APPEND CONVERT_FILES matmul_int4_op.cc)
+endif()
+
 nv_library(
   tensorrt_converter
   SRCS ${CONVERT_FILES}
